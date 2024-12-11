@@ -1,55 +1,25 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:palette_generator/palette_generator.dart';
+import 'package:letsfit/bookdetailpage.dart';
 
-class ApiService {
-  final String baseUrl = "https://gutendex.com/books";
-
-  Future<Map<String, dynamic>> fetchBooks({int page = 1, String? genre}) async {
-    String url = '$baseUrl/?page=$page';
-    if (genre != null) {
-      url += '&topic=$genre';
-    }
-
-    final response = await http.get(Uri.parse(url));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-
-      if (data is Map<String, dynamic> && data['results'] is List) {
-        return {
-          'books': data['results'],
-          'nextPageToken': page + 1,
-          'hasMore': data['next'] != null,
-        };
-      } else {
-        throw Exception("Unexpected response format");
-      }
-    } else {
-      throw Exception("Failed to load books: ${response.reasonPhrase}");
-    }
-  }
-}
-
-class BooksApp extends StatefulWidget {
+class BookExplorer extends StatefulWidget {
   @override
-  _BooksAppState createState() => _BooksAppState();
+  _BookExplorerState createState() => _BookExplorerState();
 }
 
-class _BooksAppState extends State<BooksApp> {
-  final ApiService apiService = ApiService();
+class _BookExplorerState extends State<BookExplorer> {
+  final String baseUrl = "https://gutendex.com/books";
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
   List<dynamic> books = [];
+  List<String> genres = ["Fiction", "Fantasy", "History", "Science", "Poetry"];
+  String? selectedGenre;
   int nextPageToken = 1;
   bool isLoading = false;
   bool hasMore = true;
-  String? selectedGenre;
   String? searchQuery;
-
-  List<String> genres = ["fiction", "drama", "poetry", "adventure", "history"];
 
   @override
   void initState() {
@@ -65,8 +35,9 @@ class _BooksAppState extends State<BooksApp> {
     super.dispose();
   }
 
-  void fetchBooks({bool reset = false}) async {
+  Future<void> fetchBooks({bool reset = false}) async {
     if (isLoading || !hasMore) return;
+
     if (reset) {
       setState(() {
         books = [];
@@ -78,15 +49,28 @@ class _BooksAppState extends State<BooksApp> {
     setState(() => isLoading = true);
 
     try {
-      final response = await apiService.fetchBooks(
-        page: nextPageToken,
-        genre: selectedGenre,
-      );
-      setState(() {
-        books.addAll(response['books']);
-        nextPageToken = response['nextPageToken'];
-        hasMore = response['hasMore'];
-      });
+      String url = '$baseUrl/?page=$nextPageToken';
+      if (searchQuery != null && searchQuery!.isNotEmpty) {
+        url += '&search=$searchQuery';
+      }
+      if (selectedGenre != null) {
+        url += '&topic=$selectedGenre';
+      }
+
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is Map<String, dynamic> && data['results'] is List) {
+          setState(() {
+            books.addAll(data['results']);
+            nextPageToken++;
+            hasMore = data['next'] != null;
+          });
+        }
+      } else {
+        throw Exception("Failed to load books: ${response.reasonPhrase}");
+      }
     } catch (error) {
       print('Error fetching books: $error');
     } finally {
@@ -95,7 +79,7 @@ class _BooksAppState extends State<BooksApp> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels ==
+    if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent) {
       fetchBooks();
     }
@@ -103,8 +87,14 @@ class _BooksAppState extends State<BooksApp> {
 
   void searchBooks() {
     setState(() {
-      selectedGenre = null;
       searchQuery = _searchController.text.trim();
+    });
+    fetchBooks(reset: true);
+  }
+
+  void selectGenre(String genre) {
+    setState(() {
+      selectedGenre = genre;
     });
     fetchBooks(reset: true);
   }
@@ -118,11 +108,12 @@ class _BooksAppState extends State<BooksApp> {
           decoration: InputDecoration(
             hintText: 'Search books...',
             border: InputBorder.none,
+            hintStyle: TextStyle(color: Colors.grey),
           ),
           onSubmitted: (_) => searchBooks(),
+          style: TextStyle(color: const Color.fromARGB(255, 0, 0, 0)),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: const Color.fromARGB(255, 226, 226, 226),
         actions: [
           IconButton(
             icon: Icon(Icons.search),
@@ -139,29 +130,12 @@ class _BooksAppState extends State<BooksApp> {
               itemCount: genres.length,
               itemBuilder: (context, index) {
                 final genre = genres[index];
-                return GestureDetector(
-                  onTap: () {
-                    setState(() => selectedGenre = genre);
-                    fetchBooks(reset: true);
-                  },
-                  child: Container(
-                    margin: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(
-                      color: selectedGenre == genre
-                          ? Colors.blue
-                          : Colors.grey[300],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      genre,
-                      style: TextStyle(
-                        color: selectedGenre == genre
-                            ? Colors.white
-                            : Colors.black,
-                      ),
-                    ),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: ChoiceChip(
+                    label: Text(genre),
+                    selected: selectedGenre == genre,
+                    onSelected: (_) => selectGenre(genre),
                   ),
                 );
               },
@@ -197,68 +171,69 @@ class _BooksAppState extends State<BooksApp> {
                           : 'Unknown Author';
                       final coverUrl = book['formats']['image/jpeg'];
 
-                      return Card(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: coverUrl != null
-                                  ? Image.network(
-                                      coverUrl,
-                                      fit: BoxFit.cover,
-                                      width: double.infinity,
-                                    )
-                                  : Container(
-                                      color: Colors.grey[200],
-                                      child: Icon(
-                                        Icons.book,
-                                        size: 80,
-                                        color: Colors.grey[500],
+                      return GestureDetector(
+                        onTap: (){
+                         Navigator.push(context, MaterialPageRoute(builder: (context) => BookDetailPage(book: book )));
+
+                        },
+                        child: Card(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: coverUrl != null
+                                    ? Image.network(
+                                        coverUrl,
+                                        fit: BoxFit.cover,
+                                        width: double.infinity,
+                                      )
+                                    : Container(
+                                        color: Colors.grey[200],
+                                        child: Icon(
+                                          Icons.book,
+                                          size: 80,
+                                          color: Colors.grey[500],
+                                        ),
+                                      ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
+                                    SizedBox(height: 4),
+                                    Text(
+                                      author,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey,
+                                      ),
                                     ),
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    author,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     },
                   ),
           ),
-          if (isLoading && books.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: CircularProgressIndicator(),
-            ),
         ],
       ),
     );
